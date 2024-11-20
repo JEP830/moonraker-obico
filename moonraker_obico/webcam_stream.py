@@ -127,7 +127,7 @@ class WebcamStreamer:
 
             (janus_bin_path, ld_lib_path) = build_janus_config(webcams_to_build_janus_config, self.app_config.server.auth_token, JANUS_WS_PORT, JANUS_ADMIN_WS_PORT)
             if not janus_bin_path:
-                raise JanusNotFoundException('Janus not found or not configured correctly.')
+                raise JanusNotFoundException('Janus not found or not configured correctly. Click the link for troubleshooting guide.')
 
             self.janus = JanusConn(JANUS_WS_PORT, self.app_config, self.server_conn, self.is_pro, self.sentry)
             self.janus.start(janus_bin_path, ld_lib_path)
@@ -154,8 +154,8 @@ class WebcamStreamer:
 
         except JanusNotFoundException as e:
             streaming_error = str(e)
-            _logger.error(f'{e} Webcam is now streaming in 0.1FPS.', exc_info=True)
-            self.send_streaming_failed_event(streaming_error)
+            _logger.warning(f'{e} Webcam is now streaming in 0.1FPS.')
+            self.send_streaming_failed_event(streaming_error, info_url='https://obico.io/docs/user-guides/webcam-install-janus/')
             self.shutdown()
             # When Janus is not found, we will stream the primary camera in 0.1FPS. This provides a better user experience, and is compatible with old mobile app versions
             normalized_webcams = [self.normalized_webcam_dict(webcam) for webcam in self.webcams if webcam.is_primary_camera]
@@ -177,12 +177,12 @@ class WebcamStreamer:
         self.close_all_mjpeg_socks()
         return ('ok', None)  # return value expected for a passthru target
 
-    def send_streaming_failed_event(self, error=None):
+    def send_streaming_failed_event(self, error=None, info_url='https://obico.io/docs/user-guides/moonraker-obico/webcam/'):
         self.server_conn.post_printer_event_to_server(
             'moonraker-obico: Webcam Streaming Failed',
             error if error else f'Make sure the webcam is properly configured in moonraker-obico.cfg.',
             event_class='WARNING',
-            info_url='https://obico.io/docs/user-guides/moonraker-obico/webcam/',
+            info_url=info_url
         )
 
     def find_streaming_params(self):
@@ -302,6 +302,7 @@ class WebcamStreamer:
             self.sentry.captureException()
 
 
+    @backoff.on_exception(backoff.expo, Exception, base=3, jitter=None, max_tries=5) # Apparently crowsnest would return invalid mjpeg data right after start and hence throw off ffmpeg. We should retry in this case
     def start_ffmpeg(self, rtp_port, ffmpeg_args, retry_after_quit=False):
         ffmpeg_cmd = '{ffmpeg} -loglevel error {ffmpeg_args} -an -f rtp rtp://{janus_server}:{rtp_port}?pkt_size=1300'.format(ffmpeg=FFMPEG, ffmpeg_args=ffmpeg_args, janus_server=JANUS_SERVER, rtp_port=rtp_port)
 
@@ -318,7 +319,7 @@ class WebcamStreamer:
             returncode = ffmpeg_proc.wait(timeout=10) # If ffmpeg fails, it usually does so without 10s
             (stdoutdata, stderrdata) = ffmpeg_proc.communicate()
             msg = 'STDOUT:\n{}\nSTDERR:\n{}\n'.format(stdoutdata, stderrdata)
-            _logger.error(msg)
+            _logger.warning(msg)
             raise Exception('ffmpeg failed! Exit code: {}'.format(returncode))
         except subprocess.TimeoutExpired:
            pass
@@ -408,10 +409,7 @@ class WebcamStreamer:
         # It is possible that some orphaned ffmpeg process is running (maybe previous python process was killed -9?).
         # Ensure all ffmpeg processes are killed
         with open(self.ffmpeg_pid_file_path(rtc_port), 'r') as pid_file:
-            try:
-                subprocess.run(['kill', pid_file.read()], check=True)
-            except Exception as e:
-                _logger.warning('Failed to shutdown ffmpeg - ' + str(e))
+            subprocess.run(['kill', pid_file.read()], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def shutdown_subprocesses(self):
         if self.janus:

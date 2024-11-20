@@ -42,14 +42,14 @@ class ExpoBackoff:
     def more(self, e):
         self.attempts += 1
         if self.max_attempts > 0 and self.attempts > self.max_attempts:
-            _logger.error('Giving up after %d attempts on error: %s' % (self.attempts, e))
+            _logger.warning('Giving up after %d attempts on error: %s' % (self.attempts, e))
             raise e
         else:
             delay = 2 ** (self.attempts-3)
             if delay > self.max_seconds:
                 delay = self.max_seconds
             delay *= 0.5 + random.random()
-            _logger.error('Attempt %d - backing off %f seconds: %s' % (self.attempts, delay, e))
+            _logger.info('Attempt %d - backing off %f seconds: %s' % (self.attempts, delay, e))
 
             time.sleep(delay)
 
@@ -221,8 +221,8 @@ def is_port_open(host, port):
         return sock.connect_ex((host, port)) == 0
 
 
-@backoff.on_exception(backoff.expo, Exception, max_tries=3, jitter=None)
-@backoff.on_predicate(backoff.expo, max_tries=3, jitter=None)
+@backoff.on_exception(backoff.expo, Exception, max_tries=6, jitter=None)
+@backoff.on_predicate(backoff.expo, max_tries=6, jitter=None)
 def wait_for_port(host, port):
     return is_port_open(host, port)
 

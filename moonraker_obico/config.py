@@ -196,6 +196,7 @@ class WebcamConfig:
 class LoggingConfig:
     path: str
     level: str = 'INFO'
+    log_network: bool = False
 
 
 class Config:
@@ -268,11 +269,17 @@ class Config:
         )
 
         self.webcams = []
+        webcam_sections = [section for section in config.sections() if section.startswith("webcam")]
+        if len(webcam_sections) == 0:
+            _logger.warn('No webcam configs found. Creating default config.')
+            self._config.add_section('webcam')
+            self.write()
+            webcam_sections = [section for section in config.sections() if section.startswith("webcam")]
+
         is_primary_camera = True # First webcam is primary
-        for section in config.sections():
-            if section.startswith("webcam"):
-                self.webcams.append(WebcamConfig(webcam_config_section=config[section], is_primary_camera=is_primary_camera))
-                is_primary_camera = False
+        for section in webcam_sections:
+            self.webcams.append(WebcamConfig(webcam_config_section=config[section], is_primary_camera=is_primary_camera))
+            is_primary_camera = False
 
         self.logging = LoggingConfig(
             path=config.get(
@@ -282,6 +289,10 @@ class Config:
             level=config.get(
                 'logging', 'level',
                 fallback=''
+            ),
+            log_network=config.getboolean(
+                'logging', 'log_network',
+                fallback=False
             ),
 		)
 
@@ -309,16 +320,15 @@ class Config:
             return None
 
     def update_server_auth_token(self, auth_token: str):
+        if 'server' not in self._config:
+            self._config.add_section('server')
+
         self.server.auth_token = auth_token
         self._config.set('server', 'auth_token', auth_token)
         self.write()
 
     def get_mapped_server_heater_name(self, mr_heater_name):
         return self.moonraker_objects['heater_mapping'].get(mr_heater_name)
-
-    def get_mapped_mr_heater_name(self, server_heater_name):
-        mr_heater_name = list(self.moonraker_objects['heater_mapping'].keys())[list(self.moonraker_objects['heater_mapping'].values()).index(server_heater_name)]
-        return mr_heater_name
 
     def all_mr_heaters(self):
          return self.moonraker_objects['heater_mapping'].keys()

@@ -71,7 +71,7 @@ class App(object):
             self.q.put_nowait(event)
             return True
         except queue.Full:
-            _logger.error(f'event queue is full, dropping event {event}')
+            _logger.warning(f'event queue is full, dropping event {event}')
             return False
 
     @backoff.on_exception(backoff.expo, Exception, max_value=120)
@@ -158,6 +158,8 @@ class App(object):
 
         self.moonrakerconn.set_macro_variables('OBICO_LINK_STATUS', is_linked=True)
 
+        self.server_conn.post_status_update_to_server(with_settings=True) # We should have already collected all printer settings such as heaters and presets by this time
+
         self.nozzlecam = NozzleCam(self.model, self.server_conn, self.moonrakerconn)
         run_in_thread(self.nozzlecam.start)
 
@@ -175,7 +177,7 @@ class App(object):
 
     def stop(self, cause=None):
         if cause:
-            _logger.error(f'shutdown ({cause})')
+            _logger.info(f'shutdown ({cause})')
         else:
             _logger.info('shutdown')
 
@@ -261,7 +263,10 @@ class App(object):
 
         elif event.name == 'status_update':
             # full state update from moonraker
-            self._received_klippy_update(event.data['result'])
+            if 'result' in event.data:
+                self._received_klippy_update(event.data['result'])
+            else:
+                _logger.warning(f'Missing "result" in event data: {event.data}')
 
     def set_current_print(self, printer_state):
 
@@ -270,7 +275,7 @@ class App(object):
             if cur_job:
                 return int(cur_job.get('start_time', '0'))
             else:
-                _logger.error(f'Active job indicate in print_stats: {printer_state.status}, but not in job history: {cur_job}')
+                _logger.warning(f'Active job indicate in print_stats: {printer_state.status}, but not in job history: {cur_job}')
                 return None
 
         printer_state.set_current_print_ts(find_current_print_ts())
@@ -364,7 +369,7 @@ class App(object):
                     self.post_print_event(PrinterState.EVENT_FAILED)
                 else:
                     # FIXME
-                    _logger.error(
+                    _logger.warning(
                         f'unexpected state "{_state}", please report.')
 
                 self.unset_current_print(printer_state)
